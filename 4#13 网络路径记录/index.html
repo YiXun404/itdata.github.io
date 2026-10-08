@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TTY /dev/pts/0</title>
+    <style>
+        :root {
+            --bg: #000000;
+            --fg: #cccccc;
+            --prompt: #4e9a06;
+            --font-mono: 'Consolas', 'DejaVu Sans Mono', 'Courier New', monospace;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; background-color: var(--bg); color: var(--fg); font-family: var(--font-mono); font-size: 13px; line-height: 1.4; overflow: hidden; }
+
+        .terminal { padding: 15px; height: 100vh; display: flex; flex-direction: column; overflow-y: auto; }
+        .prompt { color: var(--prompt); font-weight: bold; }
+        .cursor { display: inline-block; width: 8px; height: 15px; background: #cccccc; vertical-align: middle; animation: blink 1s infinite; }
+        @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+
+        .out-block { margin-bottom: 8px; }
+        .raw-table { border-collapse: collapse; width: 100%; margin: 4px 0; }
+        .raw-table td { padding: 1px 6px; font-size: 12px; white-space: nowrap; }
+        .raw-table th { text-align: left; padding: 2px 6px; color: #777; font-weight: normal; border-bottom: 1px solid #333; }
+
+        /* Fullscreen Less View */
+        .less-mode { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; padding: 15px; display: flex; flex-direction: column; justify-content: space-between; z-index: 99; }
+        .less-content { white-space: pre-wrap; word-break: break-all; color: #cccccc; font-size: 12px; overflow-y: auto; }
+        .less-bar { color: #888; background: #111; padding: 2px 5px; font-size: 12px; }
+
+        .hidden { display: none !important; }
+
+        /* 完全透明的隐形重置触发点（左上角） */
+        #stealthReset {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 35px;
+            height: 35px;
+            z-index: 99999;
+            background: transparent;
+            cursor: default;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 隐形点击触发区：位于左上角顶点 -->
+    <div id="stealthReset" title="Reset Terminal"></div>
+
+    <div class="terminal" id="term">
+        
+        <div class="out-block" id="sysHeader">
+            <p style="color:#666;">Linux 5.15.0-88-generic x86_64 | Console TTY /dev/pts/0</p>
+            <p style="color:#666;">/dev/sdb1: SEC_VOLUME_EXT4 (Mounted read-only at /mnt/target_dump)</p>
+            <br>
+        </div>
+
+        <div class="out-block hidden" id="step1Output"></div>
+
+        <div class="out-block hidden" id="step2Dir">
+            <p style="color:#777;">total 8412</p>
+            <table class="raw-table">
+                <thead>
+                    <tr><th>Mode</th><th>User</th><th>Size</th><th>Time</th><th>Filename</th></tr>
+                </thead>
+                <tbody id="dirTableBody">
+                    <!-- Dynamic hashed files -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="out-block hidden" id="step3Grep">
+            <p>/mnt/target_dump/var/mail/cur/1717852504.M812304P4812.srv-mail01: To: media_reports@press.org</p>
+        </div>
+
+        <div class="out-block hidden" id="step6Whois">
+            <pre style="color:#aaa; font-family: inherit;">
+% APNIC WHOIS Database
+% Query: 10.220.32.14
+
+inetnum:        10.220.0.0 - 10.220.255.255
+netname:        POLICE-SEC-NET
+descr:          EAST CITY POLICE HEADQUARTERS NETWORK ADMINISTRATION
+admin-c:        POLICE-NET-ADMIN
+tech-c:         POLICE-NET-TECH
+status:         ASSIGNED PRIVATE VPN
+mnt-by:         MAINT-GOV-LAW
+remarks:        Encrypted IPsec Tunnel Gateway / Restricted Subnet
+            </pre>
+        </div>
+
+        <div class="out-block hidden" id="step7Trace">
+            <pre style="color:#aaa; font-family: inherit;">
+traceroute to 10.220.32.14 (10.220.32.14), 30 hops max, 60 byte packets
+ 1  192.168.10.1  0.412 ms  0.388 ms  0.351 ms
+ 2  10.220.0.1  1.120 ms  1.085 ms  1.042 ms (tun0: ipsec-gw.sec.gov.net)
+ 3  10.220.32.14  2.411 ms  2.380 ms  2.315 ms
+            </pre>
+        </div>
+
+        <div class="out-block hidden" id="step8Tshark">
+            <pre style="color:#888; font-family: inherit;">
+1 21:14:50.102931 10.220.32.14 -> 192.168.10.2 TCP 74 51042 -> 25 [SYN] Seq=0 Win=64240 Len=0
+2 21:14:50.103102 192.168.10.2 -> 10.220.32.14 TCP 74 25 -> 51042 [SYN, ACK] Seq=0 Ack=1
+3 21:15:01.481029 10.220.32.14 -> 192.168.10.2 SMTP 142 EHLO mail.it-outsource.local
+4 21:15:02.102911 10.220.32.14 -> 192.168.10.2 SMTP 812 MAIL FROM:&lt;daemon@it-outsource.local&gt;
+5 21:15:04.901822 10.220.32.14 -> 192.168.10.2 SMTP 1482 RCPT TO:&lt;media_reports@press.org&gt; [DATA TRANSFER]
+            </pre>
+        </div>
+
+        <!-- ALWAYS ACTIVE PROMPT LINE -->
+        <div class="out-block" id="lineInput">
+            <p><span class="prompt">root@forensic-node:~#</span> <span id="cmdTyped"></span><span class="cursor" id="mainCursor"></span></p>
+        </div>
+
+    </div>
+
+    <!-- LESS VIEW CONTAINER -->
+    <div class="less-mode hidden" id="lessView">
+        <div class="less-content" id="lessBody"></div>
+        <div class="less-bar" id="lessFooter">:</div>
+    </div>
+
+    <script>
+        const sequence = [
+            "python3 /opt/forensics/rip_spool.py --src /dev/sdb1 --out /mnt/target_dump/",
+            "ls -la /mnt/target_dump/var/mail/cur/",
+            "grep -rn \"media_reports\" /mnt/target_dump/var/mail/cur/",
+            "less /mnt/target_dump/var/mail/cur/1717852504.M812304P4812.srv-mail01",
+            "less /mnt/target_dump/var/mail/cur/postfix_smtp.log",
+            "whois 10.220.32.14",
+            "traceroute -n 10.220.32.14",
+            "tshark -r /mnt/target_dump/traffic.pcap -Y \"ip.addr==10.220.32.14\""
+        ];
+
+        let stepIndex = 0;
+        let charIndex = 0;
+        let inLessMode = false;
+        let isExecuting = false;
+        let pauseForScrolling = false;
+
+        function escapeHtml(text) {
+            return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+
+        // 填充乱码文件列表
+        const dirBody = document.getElementById('dirTableBody');
+        const sampleHashes = [
+            ["1717852001.M10201P4101.srv-mail01", "12.1 KB", "21:01:10"],
+            ["1717852014.M20412P4102.srv-mail01", "8.4 KB", "21:02:15"],
+            ["1717852089.M30111P4105.srv-mail01", "45.2 KB", "21:04:30"],
+            ["1717852110.M10922P4110.srv-mail01", "11.0 KB", "21:05:00"],
+            ["1717852150.M81021P4112.srv-mail01", "9.1 KB", "21:08:12"],
+            ["1717852200.M90122P4115.srv-mail01", "14.2 KB", "21:10:00"],
+            ["1717852320.M10241P4102.srv-mail01", "12.1 KB", "21:12:00"],
+            ["1717852504.M812304P4812.srv-mail01", "14.8 KB", "21:15:04"],
+            ["1717852702.M90211P4820.srv-mail01", "11.3 KB", "21:18:22"],
+            ["1717852810.M11029P4825.srv-mail01", "16.5 KB", "21:19:01"],
+            ["1717852900.M40192P4830.srv-mail01", "7.8 KB", "21:20:00"],
+            ["postfix_smtp.log", "845.2 KB", "21:20:12"],
+            ["traffic.pcap", "42.1 MB", "21:20:15"]
+        ];
+
+        for(let i=0; i<40; i++) {
+            let fname = `1717851${100+i}.M${2000+i}P${4000+i}.srv-mail01`;
+            let tr = `<tr><td>-rw-------</td><td>postfix</td><td>${(Math.random()*20+2).toFixed(1)} KB</td><td>21:00:${i < 10 ? '0'+i : (i>=60?59:i)}</td><td>${fname}</td></tr>`;
+            dirBody.innerHTML += tr;
+        }
+        sampleHashes.forEach(item => {
+            let tr = `<tr><td>-rw-------</td><td>postfix</td><td>${item[1]}</td><td>${item[2]}</td><td>${item[0]}</td></tr>`;
+            dirBody.innerHTML += tr;
+        });
+
+        // 隐形点击重置事件绑定
+        document.getElementById('stealthReset').addEventListener('click', function() {
+            resetTerminal();
+        });
+
+        // 键盘按键逻辑
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                resetTerminal();
+                return;
+            }
+
+            if (inLessMode) {
+                if (e.key === 'q' || e.key === 'Q') {
+                    exitLessView();
+                }
+                return;
+            }
+
+            if (isExecuting || stepIndex >= sequence.length) return;
+
+            const lineInput = document.getElementById('lineInput');
+            if (pauseForScrolling) {
+                pauseForScrolling = false;
+                lineInput.classList.remove('hidden');
+                document.getElementById('term').appendChild(lineInput);
+                scrollBottom();
+            }
+
+            let currentCmd = sequence[stepIndex];
+
+            if (e.key === 'Enter') {
+                document.getElementById('cmdTyped').innerText = currentCmd;
+                charIndex = currentCmd.length;
+                executeStep(stepIndex);
+                return;
+            }
+
+            if (charIndex < currentCmd.length) {
+                charIndex++;
+                document.getElementById('cmdTyped').innerText = currentCmd.substring(0, charIndex);
+            }
+        });
+
+        function executeStep(step) {
+            isExecuting = true;
+            const typedText = sequence[step];
+
+            const historyBlock = document.createElement('div');
+            historyBlock.className = 'out-block dynamic-history';
+            historyBlock.innerHTML = `<p><span class="prompt">root@forensic-node:~#</span> <span>${escapeHtml(typedText)}</span></p>`;
+
+            const term = document.getElementById('term');
+            const lineInput = document.getElementById('lineInput');
+
+            term.insertBefore(historyBlock, lineInput);
+
+            if (step === 0) {
+                const out = document.getElementById('step1Output');
+                term.insertBefore(out, lineInput);
+                out.classList.remove('hidden');
+                runExtractionScript();
+            } else if (step === 1) {
+                const out = document.getElementById('step2Dir');
+                term.insertBefore(out, lineInput);
+                out.classList.remove('hidden');
+                
+                stepIndex++;
+                charIndex = 0;
+                isExecuting = false;
+                pauseForScrolling = true; 
+                lineInput.classList.add('hidden'); 
+                document.getElementById('cmdTyped').innerText = "";
+            } else if (step === 2) {
+                const out = document.getElementById('step3Grep');
+                term.insertBefore(out, lineInput);
+                out.classList.remove('hidden');
+                nextPrompt();
+            } else if (step === 3) {
+                openLessTargetEML();
+            } else if (step === 4) {
+                openLessLogFile();
+            } else if (step === 5) {
+                const out = document.getElementById('step6Whois');
+                term.insertBefore(out, lineInput);
+                out.classList.remove('hidden');
+                nextPrompt();
+            } else if (step === 6) {
+                const out = document.getElementById('step7Trace');
+                term.insertBefore(out, lineInput);
+                out.classList.remove('hidden');
+                nextPrompt();
+            } else if (step === 7) {
+                const out = document.getElementById('step8Tshark');
+                term.insertBefore(out, lineInput);
+                out.classList.remove('hidden');
+                document.getElementById('mainCursor').style.display = 'none';
+                document.getElementById('cmdTyped').innerText = "";
+                isExecuting = false;
+                scrollBottom();
+            }
+
+            if (step !== 1 && step !== 3 && step !== 4) {
+                scrollBottom();
+            }
+        }
+
+        function nextPrompt() {
+            stepIndex++;
+            charIndex = 0;
+            isExecuting = false;
+            const term = document.getElementById('term');
+            const lineInput = document.getElementById('lineInput');
+            lineInput.classList.remove('hidden');
+            term.appendChild(lineInput);
+            document.getElementById('cmdTyped').innerText = "";
+            scrollBottom();
+        }
+
+        function runExtractionScript() {
+            const out = document.getElementById('step1Output');
+            out.innerHTML = "";
+            const logs = [
+                "[+] Mounting block device /dev/sdb1...",
+                "[+] Ripping mail spool raw records (/var/mail/cur/)...",
+                "    -> Extracted 8412 spool items [OK]",
+                "[+] Dumping network transaction daemon logs...",
+                "    -> Extracted postfix_smtp.log [OK]",
+                "    -> Extracted traffic.pcap [OK]",
+                "[+] SHA256 Verification: 8a4f91b02e4d9c021f4a... [MATCH]",
+                "[SUCCESS] Data extraction complete."
+            ];
+
+            logs.forEach((line, i) => {
+                setTimeout(() => {
+                    out.innerHTML += `<p style="color:#777;">${line}</p>`;
+                    scrollBottom();
+                    if (i === logs.length - 1) {
+                        nextPrompt();
+                    }
+                }, i * 80);
+            });
+        }
+
+        function openLessTargetEML() {
+            inLessMode = true;
+            const lessView = document.getElementById('lessView');
+            const lessBody = document.getElementById('lessBody');
+            const lessFooter = document.getElementById('lessFooter');
+
+            lessBody.innerHTML = 
+`Return-Path: &lt;daemon@it-outsource.local&gt;
+X-Original-To: media_reports@press.org
+Delivered-To: media_reports@press.org
+Received: from mail.it-outsource.local (localhost [127.0.0.1])
+	by srv-mail01.it-outsource.local (Postfix) with ESMTP id 4A21B89F2
+	for &lt;media_reports@press.org&gt;; 21:15:04 +0800
+Timestamp: 21:15:04 +0800
+From: "Anonymous" &lt;daemon@it-outsource.local&gt;
+To: media_reports@press.org
+Subject: Evidence File Export
+Message-ID: &lt;211504.4A21B89F2@srv-mail01.it-outsource.local&gt;
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="----=_Part_8492"
+
+------=_Part_8492
+Content-Type: text/plain; charset="utf-8"
+
+Surveillance photo backup enclosed.
+
+------=_Part_8492
+Content-Type: application/zip; name="ATTACH_SEC_092.ZIP"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="ATTACH_SEC_092.ZIP"
+
+UEsDBBQAAAAIAAAAAAAAAAAAAAAAAAAAAAAACQAAAEIMGTExMi5KUEf/2wBDAAMCAgICAgMC
+AG1380129481209481029481029481029481029481029481029481029481029481029481029
+------=_Part_8492--
+~
+~
+~`;
+            lessFooter.innerText = "1717852504.M812304P4812.srv-mail01 (press 'q' to quit)";
+            lessView.classList.remove('hidden');
+        }
+
+        function openLessLogFile() {
+            inLessMode = true;
+            const lessView = document.getElementById('lessView');
+            const lessBody = document.getElementById('lessBody');
+            const lessFooter = document.getElementById('lessFooter');
+
+            lessBody.innerHTML = 
+`21:14:01 srv-mail01 postfix/smtpd[4102]: connect from local.host[127.0.0.1]
+21:14:02 srv-mail01 postfix/smtpd[4102]: 1B902A1C: client=local.host[127.0.0.1]
+21:14:05 srv-mail01 postfix/smtp[4105]: 1B902A1C: to=&lt;staff@it-outsource.local&gt;, status=sent
+21:14:50 srv-mail01 postfix/smtpd[4812]: connect from client-12.it-outsource.local[192.168.10.12]
+21:14:52 srv-mail01 postfix/smtpd[4812]: 2C891102: client=client-12.it-outsource.local[192.168.10.12]
+21:15:01 srv-mail01 postfix/smtpd[4812]: connect from unknown[10.220.32.14]
+21:15:02 srv-mail01 postfix/smtpd[4812]: 4A21B89F2: client=unknown[10.220.32.14]
+21:15:04 srv-mail01 postfix/cleanup[4815]: 4A21B89F2: message-id=&lt;211504.4A21B89F2@srv-mail01.it-outsource.local&gt;
+21:15:05 srv-mail01 postfix/smtp[4820]: 4A21B89F2: to=&lt;media_reports@press.org&gt;, status=sent
+21:16:10 srv-mail01 postfix/smtpd[4812]: disconnect from unknown[10.220.32.14]
+~
+~
+~`;
+            lessFooter.innerText = "postfix_smtp.log (press 'q' to quit)";
+            lessView.classList.remove('hidden');
+        }
+
+        function exitLessView() {
+            inLessMode = false;
+            document.getElementById('lessView').classList.add('hidden');
+            nextPrompt();
+        }
+
+        function scrollBottom() {
+            const term = document.getElementById('term');
+            term.scrollTop = term.scrollHeight;
+        }
+
+        // 终端完整复位函数
+        function resetTerminal() {
+            stepIndex = 0;
+            charIndex = 0;
+            inLessMode = false;
+            isExecuting = false;
+            pauseForScrolling = false;
+
+            document.getElementById('lessView').classList.add('hidden');
+
+            const outputs = ['step1Output', 'step2Dir', 'step3Grep', 'step6Whois', 'step7Trace', 'step8Tshark'];
+            outputs.forEach(id => {
+                const el = document.getElementById(id);
+                el.classList.add('hidden');
+            });
+            document.getElementById('step1Output').innerHTML = "";
+
+            document.querySelectorAll('.dynamic-history').forEach(el => el.remove());
+
+            const lineInput = document.getElementById('lineInput');
+            lineInput.classList.remove('hidden');
+            document.getElementById('term').appendChild(lineInput);
+            document.getElementById('cmdTyped').innerText = "";
+            document.getElementById('mainCursor').style.display = 'inline-block';
+
+            document.getElementById('term').scrollTop = 0;
+        }
+    </script>
+</body>
+</html>
